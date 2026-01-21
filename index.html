@@ -229,6 +229,17 @@ let port = null;
 let writer = null;
 let reader = null;
 
+// ===== DIAGNOSTYKA Web Serial (pomaga ustalić czemu na telefonie nie ma prompta) =====
+console.group("=== Web Serial DIAGNOSTYKA ===");
+console.log("User-Agent:", navigator.userAgent);
+console.log("isSecureContext:", window.isSecureContext);
+console.log("location.protocol:", location.protocol);
+console.log("navigator.serial exists:", "serial" in navigator);
+console.log("navigator.serial value:", navigator.serial);
+console.groupEnd();
+// ================================================================================
+
+
 let deviceId = "";
 let deviceName = "";
 let deviceUID = "";
@@ -278,6 +289,20 @@ const wCRCTable = [
 ];
 
 connectButton.addEventListener("click", async () => {
+  console.group("=== Kliknięto Połącz ===");
+  console.log("navigator.serial exists:", "serial" in navigator);
+  console.log("navigator.serial:", navigator.serial);
+  console.log("isSecureContext:", window.isSecureContext);
+  console.log("port before:", port);
+  console.groupEnd();
+
+  // Jeśli Web Serial nie jest dostępne (częste na Androidzie), nie będzie prompta.
+  if (!("serial" in navigator)) {
+    statusText.textContent = "Status: Web Serial niedostępny w tej przeglądarce";
+    console.error("Web Serial API NIE jest dostępne – brak prompta to zachowanie poprawne.");
+    return;
+  }
+
   if (port) {
     keepReading = false;
     try {
@@ -294,8 +319,13 @@ connectButton.addEventListener("click", async () => {
     statusText.textContent = "Status: Rozłączono";
   } else {
     try {
+      console.log("Wywołuję navigator.serial.requestPort()");
       port = await navigator.serial.requestPort();
+      console.log("Wybrany port:", port);
+
       await port.open({ baudRate: 9600 });
+      console.log("Port otwarty");
+
       writer = port.writable.getWriter();
 
       if (port.readable) {
@@ -313,6 +343,7 @@ connectButton.addEventListener("click", async () => {
     }
   }
 });
+
 
 function calculateCRC16(data) {
   let crc = 0xFFFF;
