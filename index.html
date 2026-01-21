@@ -150,16 +150,8 @@ button:hover {
     }
 
 /* ===== Logger UI ===== */
-#loggerWrap{
-  margin-top:10px;
-}
-#loggerHeader{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  justify-content:space-between;
-  margin-top:10px;
-}
+#loggerWrap{ margin-top:10px; }
+#loggerHeader{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:10px; }
 #logger{
   background:#111;
   border:1px solid #444;
@@ -175,11 +167,7 @@ button:hover {
 .log-ok{color:#4ec9b0;}
 .log-warn{color:#dcdcaa;}
 .log-err{color:#f44747;}
-.smallBtn{
-  font-size:12px;
-  padding:6px 10px;
-  margin-top:0;
-}
+.smallBtn{ font-size:12px; padding:6px 10px; margin-top:0; }
 
 </style>
 </head>
@@ -265,48 +253,13 @@ button:hover {
     </section>
   </main>
 
-  <!-- WebUSBSerial: WebSerial-like API na WebUSB (przydatne na Androidzie dla USB-UART) -->
+  <!-- WebUSBSerial: WebSerial-like API na WebUSB (Android + USB-UART) -->
   <script src="https://cdn.jsdelivr.net/gh/NielsLeenheer/WebUSBSerial@master/dist/webusb-serial.umd.js"></script>
 
   <script>
 let port = null;
 let writer = null;
 let reader = null;
-
-// ===== Wybór backendu: WebSerial (desktop) vs WebUSBSerial (Android/USB-UART) =====
-const isAndroid = /Android/i.test(navigator.userAgent);
-const hasWebSerial = ("serial" in navigator);
-const hasWebUSBSerial = (typeof window.WebUSBSerial !== "undefined");
-const hasWebUSB = ("usb" in navigator);
-
-function getSerialBackendName() {
-  if (isAndroid && hasWebUSBSerial) return "WebUSBSerial";
-  if (hasWebSerial) return "WebSerial";
-  if (hasWebUSBSerial) return "WebUSBSerial";
-  return "Brak";
-}
-
-async function requestPortCompat() {
-  // Na Androidzie USB-UART zwykle NIE pojawia się w WebSerial, ale WebUSB może go zobaczyć przez WebUSBSerial.
-  if (isAndroid && hasWebUSBSerial) {
-    return await window.WebUSBSerial.requestPort({ filters: [{ usbVendorId: 0x0403 }] });
-  }
-  if (hasWebSerial) {
-    return await navigator.serial.requestPort();
-  }
-  if (hasWebUSBSerial) {
-    return await window.WebUSBSerial.requestPort({ filters: [{ usbVendorId: 0x0403 }] });
-  }
-  throw new Error("Brak wsparcia: WebSerial/WebUSBSerial niedostępne w tej przeglądarce.");
-}
-// ================================================================================
-
-uiLog("Start strony", "ok");
-uiLog("Backend: " + getSerialBackendName());
-uiLog("isSecureContext=" + window.isSecureContext);
-uiLog("navigator.usb=" + ("usb" in navigator));
-uiLog("navigator.serial=" + ("serial" in navigator));
-
 
 // ===== DIAGNOSTYKA Web Serial (pomaga ustalić czemu na telefonie nie ma prompta) =====
 console.group("=== Web Serial DIAGNOSTYKA ===");
@@ -361,6 +314,11 @@ const _cw = console.warn.bind(console);
 console.log = (...args) => { _cl(...args); uiLog(args.map(String).join(" "), "info"); };
 console.warn = (...args) => { _cw(...args); uiLog(args.map(String).join(" "), "warn"); };
 console.error = (...args) => { _ce(...args); uiLog(args.map(String).join(" "), "err"); };
+
+uiLog("Start strony", "ok");
+uiLog("isSecureContext=" + window.isSecureContext);
+uiLog("navigator.usb=" + ("usb" in navigator));
+uiLog("WebUSBSerial=" + (typeof WebUSBSerial !== "undefined"));
 // ==============================================================
 
 const wCRCTable = [
@@ -399,25 +357,16 @@ const wCRCTable = [
 ];
 
 connectButton.addEventListener("click", async () => {
-  console.group("=== Kliknięto Połącz ===");
-  console.log("Backend:", getSerialBackendName());
-  console.log("navigator.serial exists:", "serial" in navigator);
-  console.log("navigator.serial:", navigator.serial);
+  console.group("=== Kliknięto Połącz (WebUSB) ===");
   console.log("isSecureContext:", window.isSecureContext);
+  console.log("navigator.usb:", "usb" in navigator);
+  console.log("WebUSBSerial:", typeof WebUSBSerial !== "undefined");
   console.log("port before:", port);
   console.groupEnd();
 
-  // Jeśli Web Serial nie jest dostępne (częste na Androidzie), nie będzie prompta.
-  if (!("serial" in navigator)) {
-    statusText.textContent = "Status: Web Serial niedostępny w tej przeglądarce";
-    console.error("Web Serial API NIE jest dostępne – brak prompta to zachowanie poprawne.");
-    return;
-  }
-
-
-  if (!hasWebSerial && !hasWebUSBSerial) {
-    statusText.textContent = "Status: Brak wsparcia WebSerial/WebUSB w tej przeglądarce";
-    console.error("Brak wsparcia WebSerial/WebUSBSerial. Użyj Chrome/Edge (Chromium) i HTTPS.");
+  if (!("usb" in navigator) || typeof WebUSBSerial === "undefined") {
+    statusText.textContent = "Status: Brak wsparcia WebUSB w tej przeglądarce";
+    console.error("Brak WebUSB lub WebUSBSerial. Użyj Chrome/Edge (Chromium) i HTTPS.");
     return;
   }
 
@@ -435,32 +384,41 @@ connectButton.addEventListener("click", async () => {
     reader = null;
     connectButton.textContent = "Połącz z portem";
     statusText.textContent = "Status: Rozłączono";
-  } else {
-    try {
-      console.log("Wywołuję navigator.serial.requestPort()");
-      port = await requestPortCompat();
-      console.log("Wybrany port:", port);
+    return;
+  }
 
-      await port.open({ baudRate: 9600 });
-      console.log("Port otwarty");
-
-      writer = port.writable.getWriter();
-
-      if (port.readable) {
-        reader = port.readable.getReader();
-        keepReading = true;
-        statusText.textContent = "Status: Połączono z portem";
-        await Id();
-      } else {
-        console.error("Port nie jest dostępny do czytania.");
-        statusText.textContent = "Status: Port niedostępny";
-      }
-    } catch (err) {
-      console.error("Błąd połączenia:", err);
-      statusText.textContent = "Status: Błąd połączenia";
+  try {
+    console.log("Wywołuję WebUSBSerial.requestPort() (filtr FTDI VID=0x0403)");
+    port = await WebUSBSerial.requestPort({
+      filters: [{ usbVendorId: 0x0403 }]
+    });
+    console.log("Wybrano urządzenie:", port?.device?.productName || "(brak nazwy)");
+    if (port?.device) {
+      console.log(
+        "VID=0x" + port.device.vendorId.toString(16) +
+        " PID=0x" + port.device.productId.toString(16)
+      );
     }
+
+    await port.open({ baudRate: 9600 });
+    writer = port.writable.getWriter();
+
+    if (port.readable) {
+      reader = port.readable.getReader();
+      keepReading = true;
+      statusText.textContent = "Status: Połączono (WebUSB)";
+      connectButton.textContent = "Rozłącz";
+      await Id();
+    } else {
+      console.error("Port nie jest dostępny do czytania.");
+      statusText.textContent = "Status: Port niedostępny (readable=false)";
+    }
+  } catch (err) {
+    console.error("Błąd połączenia:", err);
+    statusText.textContent = "Status: Błąd połączenia";
   }
 });
+
 
 
 function calculateCRC16(data) {
