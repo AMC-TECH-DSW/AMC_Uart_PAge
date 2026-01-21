@@ -148,6 +148,39 @@ button:hover {
       border-right: 2px solid black;
       transform: rotate(45deg);
     }
+
+/* ===== Logger UI ===== */
+#loggerWrap{
+  margin-top:10px;
+}
+#loggerHeader{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  justify-content:space-between;
+  margin-top:10px;
+}
+#logger{
+  background:#111;
+  border:1px solid #444;
+  border-radius:5px;
+  padding:10px;
+  height:180px;
+  overflow-y:auto;
+  font-family:monospace;
+  font-size:12px;
+  line-height:1.35;
+}
+.log-info{color:#9cdcfe;}
+.log-ok{color:#4ec9b0;}
+.log-warn{color:#dcdcaa;}
+.log-err{color:#f44747;}
+.smallBtn{
+  font-size:12px;
+  padding:6px 10px;
+  margin-top:0;
+}
+
 </style>
 </head>
 <body>
@@ -158,6 +191,14 @@ button:hover {
       </header>
       <button id="connectButton">Połącz z portem</button>
       <p id="status">Status: Brak połączenia</p>
+
+      <div id="loggerWrap">
+        <div id="loggerHeader">
+          <strong>Logi (na telefonie)</strong>
+          <button id="clearLog" class="smallBtn">Wyczyść</button>
+        </div>
+        <div id="logger"></div>
+      </div>
     </section>
     
     <section id="dol">
@@ -224,10 +265,48 @@ button:hover {
     </section>
   </main>
 
+  <!-- WebUSBSerial: WebSerial-like API na WebUSB (przydatne na Androidzie dla USB-UART) -->
+  <script src="https://cdn.jsdelivr.net/gh/NielsLeenheer/WebUSBSerial@master/dist/webusb-serial.umd.js"></script>
+
   <script>
 let port = null;
 let writer = null;
 let reader = null;
+
+// ===== Wybór backendu: WebSerial (desktop) vs WebUSBSerial (Android/USB-UART) =====
+const isAndroid = /Android/i.test(navigator.userAgent);
+const hasWebSerial = ("serial" in navigator);
+const hasWebUSBSerial = (typeof window.WebUSBSerial !== "undefined");
+const hasWebUSB = ("usb" in navigator);
+
+function getSerialBackendName() {
+  if (isAndroid && hasWebUSBSerial) return "WebUSBSerial";
+  if (hasWebSerial) return "WebSerial";
+  if (hasWebUSBSerial) return "WebUSBSerial";
+  return "Brak";
+}
+
+async function requestPortCompat() {
+  // Na Androidzie USB-UART zwykle NIE pojawia się w WebSerial, ale WebUSB może go zobaczyć przez WebUSBSerial.
+  if (isAndroid && hasWebUSBSerial) {
+    return await window.WebUSBSerial.requestPort({ filters: [{ usbVendorId: 0x0403 }] });
+  }
+  if (hasWebSerial) {
+    return await navigator.serial.requestPort();
+  }
+  if (hasWebUSBSerial) {
+    return await window.WebUSBSerial.requestPort({ filters: [{ usbVendorId: 0x0403 }] });
+  }
+  throw new Error("Brak wsparcia: WebSerial/WebUSBSerial niedostępne w tej przeglądarce.");
+}
+// ================================================================================
+
+uiLog("Start strony", "ok");
+uiLog("Backend: " + getSerialBackendName());
+uiLog("isSecureContext=" + window.isSecureContext);
+uiLog("navigator.usb=" + ("usb" in navigator));
+uiLog("navigator.serial=" + ("serial" in navigator));
+
 
 // ===== DIAGNOSTYKA Web Serial (pomaga ustalić czemu na telefonie nie ma prompta) =====
 console.group("=== Web Serial DIAGNOSTYKA ===");
@@ -252,6 +331,37 @@ const deviceType = document.getElementById("deviceType");
 const deviceNameHTML = document.getElementById("deviceName");
 const deviceIdHTML = document.getElementById("deviceId");
 const UID = document.getElementById("uid");
+
+// ===== Logger UI (działa bez DevTools, idealne na telefon) =====
+const loggerEl = document.getElementById("logger");
+const clearLogBtn = document.getElementById("clearLog");
+
+function uiLog(msg, level = "info") {
+  if (!loggerEl) return;
+  const line = document.createElement("div");
+  const cls = level === "ok" ? "log-ok" : level === "warn" ? "log-warn" : level === "err" ? "log-err" : "log-info";
+  line.className = cls;
+  const ts = new Date().toLocaleTimeString();
+  line.textContent = `[${ts}] ${msg}`;
+  loggerEl.appendChild(line);
+  loggerEl.scrollTop = loggerEl.scrollHeight;
+}
+
+if (clearLogBtn) {
+  clearLogBtn.addEventListener("click", () => {
+    loggerEl.innerHTML = "";
+    uiLog("Log wyczyszczony", "ok");
+  });
+}
+
+// Podpinamy console do loggera (zostawiamy też normalną konsolę)
+const _cl = console.log.bind(console);
+const _ce = console.error.bind(console);
+const _cw = console.warn.bind(console);
+console.log = (...args) => { _cl(...args); uiLog(args.map(String).join(" "), "info"); };
+console.warn = (...args) => { _cw(...args); uiLog(args.map(String).join(" "), "warn"); };
+console.error = (...args) => { _ce(...args); uiLog(args.map(String).join(" "), "err"); };
+// ==============================================================
 
 const wCRCTable = [
   0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
@@ -290,6 +400,7 @@ const wCRCTable = [
 
 connectButton.addEventListener("click", async () => {
   console.group("=== Kliknięto Połącz ===");
+  console.log("Backend:", getSerialBackendName());
   console.log("navigator.serial exists:", "serial" in navigator);
   console.log("navigator.serial:", navigator.serial);
   console.log("isSecureContext:", window.isSecureContext);
@@ -300,6 +411,13 @@ connectButton.addEventListener("click", async () => {
   if (!("serial" in navigator)) {
     statusText.textContent = "Status: Web Serial niedostępny w tej przeglądarce";
     console.error("Web Serial API NIE jest dostępne – brak prompta to zachowanie poprawne.");
+    return;
+  }
+
+
+  if (!hasWebSerial && !hasWebUSBSerial) {
+    statusText.textContent = "Status: Brak wsparcia WebSerial/WebUSB w tej przeglądarce";
+    console.error("Brak wsparcia WebSerial/WebUSBSerial. Użyj Chrome/Edge (Chromium) i HTTPS.");
     return;
   }
 
@@ -320,7 +438,7 @@ connectButton.addEventListener("click", async () => {
   } else {
     try {
       console.log("Wywołuję navigator.serial.requestPort()");
-      port = await navigator.serial.requestPort();
+      port = await requestPortCompat();
       console.log("Wybrany port:", port);
 
       await port.open({ baudRate: 9600 });
