@@ -389,9 +389,8 @@ connectButton.addEventListener("click", async () => {
 
   try {
     console.log("Wywołuję WebUSBSerial.requestPort() (filtr FTDI VID=0x0403)");
-    port = await WebUSBSerial.requestPort({
-      filters: [{ usbVendorId: 0x0403 }]
-    });
+    port = await WebUSBSerial.requestPort();
+    
     console.log("Wybrano urządzenie:", port?.device?.productName || "(brak nazwy)");
     if (port?.device) {
       console.log(
