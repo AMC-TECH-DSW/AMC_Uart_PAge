@@ -413,6 +413,7 @@ connectButton.addEventListener("click", async () => {
     }
   } catch (err) {
     console.error("Błąd połączenia:", err);
+    console.error("name:", err?.name, "message:", err?.message, "stack:", err?.stack);
     statusText.textContent = "Status: Błąd połączenia";
   }
 });
@@ -471,11 +472,6 @@ async function readLoop() {
         }
         receivedBytes = receivedData.length;
 
-        const hexString = receivedData
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join(' ')
-          .toUpperCase();
-
         if (receivedData.length >= 3) {
           const byteCount = receivedData[2];
           expectedBytes = 3 + byteCount + 2;
@@ -486,6 +482,24 @@ async function readLoop() {
           }
         }
       }
+    }
+
+    clearTimeout(timeoutTimer);
+
+    if (receivedData.length > 0) {
+      const hexData = receivedData
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join(" ")
+        .toUpperCase();
+      return hexData;
+    } else {
+      dynamicTimeout = Math.min(dynamicTimeout + timeoutIncrement, maxTimeout);
+      return null;
+    }
+  } catch (err) {
+    console.error("Błąd odbioru:", err);
+    throw err;
+  }
 }
       }
     }
