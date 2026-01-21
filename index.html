@@ -149,9 +149,9 @@ button:hover {
       transform: rotate(45deg);
     }
 
-/* ===== Logger UI ===== */
+/* ===== Logger UI (na telefon bez DevTools) ===== */
 #loggerWrap{ margin-top:10px; }
-#loggerHeader{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:10px; }
+#loggerHeader{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; }
 #logger{
   background:#111;
   border:1px solid #444;
@@ -182,7 +182,7 @@ button:hover {
 
       <div id="loggerWrap">
         <div id="loggerHeader">
-          <strong>Logi (na telefonie)</strong>
+          <strong>Logi</strong>
           <button id="clearLog" class="smallBtn">Wyczyść</button>
         </div>
         <div id="logger"></div>
@@ -261,17 +261,6 @@ let port = null;
 let writer = null;
 let reader = null;
 
-// ===== DIAGNOSTYKA Web Serial (pomaga ustalić czemu na telefonie nie ma prompta) =====
-console.group("=== Web Serial DIAGNOSTYKA ===");
-console.log("User-Agent:", navigator.userAgent);
-console.log("isSecureContext:", window.isSecureContext);
-console.log("location.protocol:", location.protocol);
-console.log("navigator.serial exists:", "serial" in navigator);
-console.log("navigator.serial value:", navigator.serial);
-console.groupEnd();
-// ================================================================================
-
-
 let deviceId = "";
 let deviceName = "";
 let deviceUID = "";
@@ -285,21 +274,19 @@ const deviceNameHTML = document.getElementById("deviceName");
 const deviceIdHTML = document.getElementById("deviceId");
 const UID = document.getElementById("uid");
 
-// ===== Logger UI (działa bez DevTools, idealne na telefon) =====
+// ===== Logger UI =====
 const loggerEl = document.getElementById("logger");
 const clearLogBtn = document.getElementById("clearLog");
 
-function uiLog(msg, level = "info") {
+function uiLog(msg, level="info") {
   if (!loggerEl) return;
   const line = document.createElement("div");
   const cls = level === "ok" ? "log-ok" : level === "warn" ? "log-warn" : level === "err" ? "log-err" : "log-info";
   line.className = cls;
-  const ts = new Date().toLocaleTimeString();
-  line.textContent = `[${ts}] ${msg}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
   loggerEl.appendChild(line);
   loggerEl.scrollTop = loggerEl.scrollHeight;
 }
-
 if (clearLogBtn) {
   clearLogBtn.addEventListener("click", () => {
     loggerEl.innerHTML = "";
@@ -307,19 +294,19 @@ if (clearLogBtn) {
   });
 }
 
-// Podpinamy console do loggera (zostawiamy też normalną konsolę)
+// też wypisujemy console.* do loggera (żeby błędy JS było widać na telefonie)
 const _cl = console.log.bind(console);
-const _ce = console.error.bind(console);
 const _cw = console.warn.bind(console);
-console.log = (...args) => { _cl(...args); uiLog(args.map(String).join(" "), "info"); };
-console.warn = (...args) => { _cw(...args); uiLog(args.map(String).join(" "), "warn"); };
-console.error = (...args) => { _ce(...args); uiLog(args.map(String).join(" "), "err"); };
+const _ce = console.error.bind(console);
+console.log = (...a) => { _cl(...a); uiLog(a.map(String).join(" "), "info"); };
+console.warn = (...a) => { _cw(...a); uiLog(a.map(String).join(" "), "warn"); };
+console.error = (...a) => { _ce(...a); uiLog(a.map(String).join(" "), "err"); };
 
 uiLog("Start strony", "ok");
-uiLog("isSecureContext=" + window.isSecureContext);
+uiLog("HTTPS/secure=" + window.isSecureContext);
 uiLog("navigator.usb=" + ("usb" in navigator));
 uiLog("WebUSBSerial=" + (typeof WebUSBSerial !== "undefined"));
-// ==============================================================
+// ======================
 
 const wCRCTable = [
   0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
@@ -357,19 +344,7 @@ const wCRCTable = [
 ];
 
 connectButton.addEventListener("click", async () => {
-  console.group("=== Kliknięto Połącz (WebUSB) ===");
-  console.log("isSecureContext:", window.isSecureContext);
-  console.log("navigator.usb:", "usb" in navigator);
-  console.log("WebUSBSerial:", typeof WebUSBSerial !== "undefined");
-  console.log("port before:", port);
-  console.groupEnd();
-
-  if (!("usb" in navigator) || typeof WebUSBSerial === "undefined") {
-    statusText.textContent = "Status: Brak wsparcia WebUSB w tej przeglądarce";
-    console.error("Brak WebUSB lub WebUSBSerial. Użyj Chrome/Edge (Chromium) i HTTPS.");
-    return;
-  }
-
+  uiLog("Klik: Połącz/Rozłącz", "info");
   if (port) {
     keepReading = false;
     try {
@@ -384,41 +359,27 @@ connectButton.addEventListener("click", async () => {
     reader = null;
     connectButton.textContent = "Połącz z portem";
     statusText.textContent = "Status: Rozłączono";
-    return;
-  }
+  } else {
+    try {
+      port = await WebUSBSerial.requestPort();
+      await port.open({ baudRate: 9600 });
+      writer = port.writable.getWriter();
 
-  try {
-    console.log("Wywołuję WebUSBSerial.requestPort() (filtr FTDI VID=0x0403)");
-    port = await WebUSBSerial.requestPort();
-    console.log("Wybrano urządzenie:", port?.device?.productName || "(brak nazwy)");
-    if (port?.device) {
-      console.log(
-        "VID=0x" + port.device.vendorId.toString(16) +
-        " PID=0x" + port.device.productId.toString(16)
-      );
+      if (port.readable) {
+        reader = port.readable.getReader();
+        keepReading = true;
+        statusText.textContent = "Status: Połączono z portem";
+        await Id();
+      } else {
+        console.error("Port nie jest dostępny do czytania.");
+        statusText.textContent = "Status: Port niedostępny";
+      }
+    } catch (err) {
+      console.error("Błąd połączenia:", err);
+      statusText.textContent = "Status: Błąd połączenia";
     }
-
-    await port.open({ baudRate: 9600 });
-    writer = port.writable.getWriter();
-
-    if (port.readable) {
-      reader = port.readable.getReader();
-      keepReading = true;
-      statusText.textContent = "Status: Połączono (WebUSB)";
-      connectButton.textContent = "Rozłącz";
-      await Id();
-    } else {
-      console.error("Port nie jest dostępny do czytania.");
-      statusText.textContent = "Status: Port niedostępny (readable=false)";
-    }
-  } catch (err) {
-    console.error("Błąd połączenia:", err);
-    console.error("name:", err?.name, "message:", err?.message, "stack:", err?.stack);
-    statusText.textContent = "Status: Błąd połączenia";
   }
 });
-
-
 
 function calculateCRC16(data) {
   let crc = 0xFFFF;
@@ -453,24 +414,24 @@ async function readLoop() {
       if (done) break;
 
       if (value) {
-        // WebUSBSerial może zwracać Uint8Array, ArrayBuffer albo DataView – normalizujemy do Uint8Array
+        // WebUSBSerial może zwracać Uint8Array albo ArrayBuffer – normalizujemy:
         let chunk;
-        if (value instanceof Uint8Array) {
-          chunk = value;
-        } else if (value instanceof ArrayBuffer) {
-          chunk = new Uint8Array(value);
-        } else if (value && value.buffer instanceof ArrayBuffer) {
-          // np. DataView
-          chunk = new Uint8Array(value.buffer);
-        } else {
-          console.warn("Nieznany typ danych z reader.read():", value);
+        if (value instanceof Uint8Array) chunk = value;
+        else if (value instanceof ArrayBuffer) chunk = new Uint8Array(value);
+        else if (value && value.buffer instanceof ArrayBuffer) chunk = new Uint8Array(value.buffer);
+        else if (value && value[Symbol.iterator]) chunk = value;
+        else {
+          console.warn("Nieznany typ 'value' z reader.read():", value);
           chunk = new Uint8Array([]);
         }
 
-        for (let i = 0; i < chunk.length; i++) {
-          receivedData.push(chunk[i]);
-        }
+        for (const b of chunk) receivedData.push(b);
         receivedBytes = receivedData.length;
+
+        const hexString = [...receivedData]
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join(' ')
+          .toUpperCase();
 
         if (receivedData.length >= 3) {
           const byteCount = receivedData[2];
@@ -481,26 +442,6 @@ async function readLoop() {
             break;
           }
         }
-      }
-    }
-
-    clearTimeout(timeoutTimer);
-
-    if (receivedData.length > 0) {
-      const hexData = receivedData
-        .map(b => b.toString(16).padStart(2, "0"))
-        .join(" ")
-        .toUpperCase();
-      return hexData;
-    } else {
-      dynamicTimeout = Math.min(dynamicTimeout + timeoutIncrement, maxTimeout);
-      return null;
-    }
-  } catch (err) {
-    console.error("Błąd odbioru:", err);
-    throw err;
-  }
-}
       }
     }
 
