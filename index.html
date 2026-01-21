@@ -224,10 +224,41 @@ button:hover {
     </section>
   </main>
 
+  <!-- WebUSBSerial: WebSerial-like API na WebUSB (przydatne na Androidzie dla USB-UART) -->
+  <script src="https://cdn.jsdelivr.net/gh/NielsLeenheer/WebUSBSerial@master/dist/webusb-serial.umd.js"></script>
+
   <script>
 let port = null;
 let writer = null;
 let reader = null;
+
+// ===== Wybór backendu: WebSerial (desktop) vs WebUSBSerial (Android/USB-UART) =====
+const isAndroid = /Android/i.test(navigator.userAgent);
+const hasWebSerial = ("serial" in navigator);
+const hasWebUSBSerial = (typeof window.WebUSBSerial !== "undefined");
+const hasWebUSB = ("usb" in navigator);
+
+function getSerialBackendName() {
+  if (isAndroid && hasWebUSBSerial) return "WebUSBSerial";
+  if (hasWebSerial) return "WebSerial";
+  if (hasWebUSBSerial) return "WebUSBSerial";
+  return "Brak";
+}
+
+async function requestPortCompat() {
+  // Na Androidzie USB-UART zwykle NIE pojawia się w WebSerial, ale WebUSB może go zobaczyć przez WebUSBSerial.
+  if (isAndroid && hasWebUSBSerial) {
+    return await window.WebUSBSerial.requestPort();
+  }
+  if (hasWebSerial) {
+    return await navigator.serial.requestPort();
+  }
+  if (hasWebUSBSerial) {
+    return await window.WebUSBSerial.requestPort();
+  }
+  throw new Error("Brak wsparcia: WebSerial/WebUSBSerial niedostępne w tej przeglądarce.");
+}
+// ================================================================================
 
 // ===== DIAGNOSTYKA Web Serial (pomaga ustalić czemu na telefonie nie ma prompta) =====
 console.group("=== Web Serial DIAGNOSTYKA ===");
@@ -290,6 +321,7 @@ const wCRCTable = [
 
 connectButton.addEventListener("click", async () => {
   console.group("=== Kliknięto Połącz ===");
+  console.log("Backend:", getSerialBackendName());
   console.log("navigator.serial exists:", "serial" in navigator);
   console.log("navigator.serial:", navigator.serial);
   console.log("isSecureContext:", window.isSecureContext);
@@ -300,6 +332,13 @@ connectButton.addEventListener("click", async () => {
   if (!("serial" in navigator)) {
     statusText.textContent = "Status: Web Serial niedostępny w tej przeglądarce";
     console.error("Web Serial API NIE jest dostępne – brak prompta to zachowanie poprawne.");
+    return;
+  }
+
+
+  if (!hasWebSerial && !hasWebUSBSerial) {
+    statusText.textContent = "Status: Brak wsparcia WebSerial/WebUSB w tej przeglądarce";
+    console.error("Brak wsparcia WebSerial/WebUSBSerial. Użyj Chrome/Edge (Chromium) i HTTPS.");
     return;
   }
 
@@ -320,7 +359,7 @@ connectButton.addEventListener("click", async () => {
   } else {
     try {
       console.log("Wywołuję navigator.serial.requestPort()");
-      port = await navigator.serial.requestPort();
+      port = await requestPortCompat();
       console.log("Wybrany port:", port);
 
       await port.open({ baudRate: 9600 });
