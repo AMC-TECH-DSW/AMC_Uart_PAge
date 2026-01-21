@@ -390,7 +390,6 @@ connectButton.addEventListener("click", async () => {
   try {
     console.log("Wywołuję WebUSBSerial.requestPort() (filtr FTDI VID=0x0403)");
     port = await WebUSBSerial.requestPort();
-    
     console.log("Wybrano urządzenie:", port?.device?.productName || "(brak nazwy)");
     if (port?.device) {
       console.log(
@@ -453,10 +452,26 @@ async function readLoop() {
       if (done) break;
 
       if (value) {
-        receivedData = [...receivedData, ...value];
+        // WebUSBSerial może zwracać Uint8Array, ArrayBuffer albo DataView – normalizujemy do Uint8Array
+        let chunk;
+        if (value instanceof Uint8Array) {
+          chunk = value;
+        } else if (value instanceof ArrayBuffer) {
+          chunk = new Uint8Array(value);
+        } else if (value && value.buffer instanceof ArrayBuffer) {
+          // np. DataView
+          chunk = new Uint8Array(value.buffer);
+        } else {
+          console.warn("Nieznany typ danych z reader.read():", value);
+          chunk = new Uint8Array([]);
+        }
+
+        for (let i = 0; i < chunk.length; i++) {
+          receivedData.push(chunk[i]);
+        }
         receivedBytes = receivedData.length;
 
-        const hexString = [...receivedData]
+        const hexString = receivedData
           .map(b => b.toString(16).padStart(2, '0'))
           .join(' ')
           .toUpperCase();
@@ -470,6 +485,8 @@ async function readLoop() {
             break;
           }
         }
+      }
+}
       }
     }
 
